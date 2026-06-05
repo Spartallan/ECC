@@ -206,6 +206,8 @@ function renderUserContent(html: string) {
 }
 ```
 
+DOMPurifyは選択肢の1つであり、`sanitize-html`は一般的な代替手段です。サニタイズは、ユーザーが作成したHTMLを本当にレンダリングする必要がある場合にのみ行ってください。単にユーザーのテキストを表示するだけなら、`dangerouslySetInnerHTML`とサニタイザーに頼るのではなく、テキストとしてレンダリング（または出力時にエスケープ）してください。
+
 #### コンテンツセキュリティポリシー
 ```typescript
 // next.config.js
@@ -289,11 +291,43 @@ const searchLimiter = rateLimit({
 app.use('/api/search', searchLimiter)
 ```
 
+#### サーバーレスとエッジランタイム
+
+`express-rate-limit`はカウンターをプロセスメモリに保持するため、長時間稼働するサーバーを前提としています。サーバーレスやエッジプラットフォームでは呼び出しごとに新しいプロセスになる可能性があるため、共有ストアまたはプラットフォームネイティブの制御を使用してください：
+
+```typescript
+// Upstash Ratelimit - shared Redis-backed counters that work on
+// serverless and edge runtimes. Module-scope init works on Vercel and
+// Netlify; on Cloudflare Workers env bindings are only available inside
+// the handler, so construct the client there instead.
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(100, '15 m')
+})
+
+export async function POST(request: Request) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const { success } = await ratelimit.limit(ip)
+
+  if (!success) {
+    return new Response('Too many requests', { status: 429 })
+  }
+
+  // Process request
+}
+```
+
+依存関係の追加が選択肢にない場合は、プラットフォームネイティブのレート制限を優先してください：Cloudflare WAFのレート制限ルール、Vercel WAF、AWS API Gatewayのスロットリング、またはアプリの前段のnginx `limit_req`。
+
 #### 検証ステップ
 - [ ] すべてのAPIエンドポイントでレート制限
 - [ ] 高コスト操作でより厳しい制限
 - [ ] IPベースのレート制限
 - [ ] ユーザーベースのレート制限（認証済み）
+- [ ] リミッターの状態がサーバーレス/エッジの呼び出し間で維持される（共有ストア）
 
 ### 8. 機密データの露出
 
@@ -334,58 +368,9 @@ catch (error) {
 - [ ] 詳細なエラーはサーバーログのみ
 - [ ] ユーザーにスタックトレースを露出しない
 
-### 9. ブロックチェーンセキュリティ (Solana)
+### 9. Web3 / ブロックチェーン（該当する場合）
 
-#### ウォレット検証
-```typescript
-import { verify } from '@solana/web3.js'
-
-async function verifyWalletOwnership(
-  publicKey: string,
-  signature: string,
-  message: string
-) {
-  try {
-    const isValid = verify(
-      Buffer.from(message),
-      Buffer.from(signature, 'base64'),
-      Buffer.from(publicKey, 'base64')
-    )
-    return isValid
-  } catch (error) {
-    return false
-  }
-}
-```
-
-#### トランザクション検証
-```typescript
-async function verifyTransaction(transaction: Transaction) {
-  // 受信者を検証
-  if (transaction.to !== expectedRecipient) {
-    throw new Error('Invalid recipient')
-  }
-
-  // 金額を検証
-  if (transaction.amount > maxAmount) {
-    throw new Error('Amount exceeds limit')
-  }
-
-  // ユーザーに十分な残高があることを確認
-  const balance = await getBalance(transaction.from)
-  if (balance < transaction.amount) {
-    throw new Error('Insufficient balance')
-  }
-
-  return true
-}
-```
-
-#### 検証ステップ
-- [ ] ウォレット署名を検証
-- [ ] トランザクション詳細を検証
-- [ ] トランザクション前の残高チェック
-- [ ] ブラインドトランザクション署名なし
+ウォレット所有権の検証、トランザクションの検証、署名UXは、専用の`web3-dapp-security`スキルに移動しました。スマートコントラクトの監査については`defi-amm-security`を、トークン精度の落とし穴については`evm-token-decimals`を参照してください。プロジェクトがチェーンに関わる場合にこれらのスキルを適用してください。これらはすべての一般的なセキュリティレビューに含めるべきものではありません。
 
 ### 10. 依存関係セキュリティ
 
@@ -480,7 +465,7 @@ test('enforces rate limits', async () => {
 - [ ] **Row Level Security**：Supabaseで有効化
 - [ ] **CORS**：適切に設定
 - [ ] **ファイルアップロード**：検証済み（サイズ、タイプ）
-- [ ] **ウォレット署名**：検証済み（ブロックチェーンの場合）
+- [ ] **ウォレット署名**：検証済み（ブロックチェーンの場合 - `web3-dapp-security`を参照）
 
 ## リソース
 

@@ -207,6 +207,8 @@ function renderUserContent(html: string) {
 }
 ```
 
+DOMPurify bir seçenektir; `sanitize-html` yaygın bir alternatiftir. Yalnızca kullanıcı tarafından yazılmış HTML'i gerçekten render etmeniz gerektiğinde sanitize edin - sadece kullanıcı metnini gösteriyorsanız, `dangerouslySetInnerHTML` artı bir sanitizer'a başvurmak yerine onu metin olarak render edin (veya çıktıda escape edin).
+
 #### Content Security Policy
 ```typescript
 // next.config.js
@@ -290,11 +292,43 @@ const searchLimiter = rateLimit({
 app.use('/api/search', searchLimiter)
 ```
 
+#### Sunucusuz ve Edge Çalışma Zamanları
+
+`express-rate-limit` sayaçlarını process belleğinde tutar; bu da uzun ömürlü bir sunucu varsayar. Sunucusuz veya edge platformlarda her çağrı yeni bir process olabilir, bu yüzden paylaşılan bir store veya platformun yerleşik kontrolünü kullanın:
+
+```typescript
+// Upstash Ratelimit - shared Redis-backed counters that work on
+// serverless and edge runtimes. Module-scope init works on Vercel and
+// Netlify; on Cloudflare Workers env bindings are only available inside
+// the handler, so construct the client there instead.
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(100, '15 m')
+})
+
+export async function POST(request: Request) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const { success } = await ratelimit.limit(ip)
+
+  if (!success) {
+    return new Response('Too many requests', { status: 429 })
+  }
+
+  // Process request
+}
+```
+
+Bağımlılık eklemek bir seçenek değilse, platforma özgü rate limiting'i tercih edin: Cloudflare WAF rate-limiting kuralları, Vercel WAF, AWS API Gateway throttling veya uygulamanın önünde nginx `limit_req`.
+
 #### Doğrulama Adımları
 - [ ] Tüm API endpoint'lerinde rate limiting
 - [ ] Pahalı operasyonlarda daha sıkı limitler
 - [ ] IP tabanlı rate limiting
 - [ ] Kullanıcı tabanlı rate limiting (authenticated)
+- [ ] Limiter durumu serverless/edge çağrıları boyunca korunuyor (paylaşılan store)
 
 ### 8. Hassas Veri İfşası
 
@@ -335,58 +369,9 @@ catch (error) {
 - [ ] Detaylı hatalar sadece sunucu loglarında
 - [ ] Kullanıcılara stack trace gösterilmiyor
 
-### 9. Blockchain Güvenliği (Solana)
+### 9. Web3 / Blockchain (uygulanabilirse)
 
-#### Wallet Doğrulama
-```typescript
-import { verify } from '@solana/web3.js'
-
-async function verifyWalletOwnership(
-  publicKey: string,
-  signature: string,
-  message: string
-) {
-  try {
-    const isValid = verify(
-      Buffer.from(message),
-      Buffer.from(signature, 'base64'),
-      Buffer.from(publicKey, 'base64')
-    )
-    return isValid
-  } catch (error) {
-    return false
-  }
-}
-```
-
-#### Transaction Doğrulama
-```typescript
-async function verifyTransaction(transaction: Transaction) {
-  // Alıcıyı doğrula
-  if (transaction.to !== expectedRecipient) {
-    throw new Error('Geçersiz alıcı')
-  }
-
-  // Miktarı doğrula
-  if (transaction.amount > maxAmount) {
-    throw new Error('Miktar limiti aşıyor')
-  }
-
-  // Kullanıcının yeterli bakiyesi olduğunu doğrula
-  const balance = await getBalance(transaction.from)
-  if (balance < transaction.amount) {
-    throw new Error('Yetersiz bakiye')
-  }
-
-  return true
-}
-```
-
-#### Doğrulama Adımları
-- [ ] Wallet imzaları doğrulanmış
-- [ ] Transaction detayları validate edilmiş
-- [ ] Transaction'lardan önce bakiye kontrolleri
-- [ ] Kör transaction imzalama yok
+Wallet sahipliği doğrulama, transaction doğrulama ve imzalama UX'i özel `web3-dapp-security` skill'ine taşındı. Smart contract denetimi için `defi-amm-security` skill'ine, token hassasiyeti tuzakları için `evm-token-decimals` skill'ine bakın. Proje bir chain'e dokunduğunda bu skill'leri uygulayın; her genel güvenlik incelemesine ait değiller.
 
 ### 10. Bağımlılık Güvenliği
 
@@ -481,7 +466,7 @@ HERHANGİ bir production deployment'ından önce:
 - [ ] **Row Level Security**: Supabase'de aktif
 - [ ] **CORS**: Düzgün yapılandırılmış
 - [ ] **Dosya Yüklemeleri**: Validate edilmiş (boyut, tip)
-- [ ] **Wallet İmzaları**: Doğrulanmış (blockchain varsa)
+- [ ] **Wallet İmzaları**: Doğrulanmış (blockchain varsa - bkz. `web3-dapp-security`)
 
 ## Kaynaklar
 

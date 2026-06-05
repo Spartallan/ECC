@@ -206,6 +206,8 @@ function renderUserContent(html: string) {
 }
 ```
 
+DOMPurify 是其中一種選擇；`sanitize-html` 是常見的替代方案。只有在確實需要渲染使用者撰寫的 HTML 時才進行淨化——如果只是顯示使用者文字，請直接以文字渲染（或在輸出時跳脫），而不要動用 `dangerouslySetInnerHTML` 加上淨化器。
+
 #### Content Security Policy
 ```typescript
 // next.config.js
@@ -289,11 +291,43 @@ const searchLimiter = rateLimit({
 app.use('/api/search', searchLimiter)
 ```
 
+#### Serverless 與邊緣執行環境
+
+`express-rate-limit` 將計數器保存在程序記憶體中，這預設伺服器是長時間執行的。在 serverless 或邊緣平台上，每次呼叫都可能是全新的程序，因此請使用共享儲存或平台原生的控制機制：
+
+```typescript
+// Upstash Ratelimit - shared Redis-backed counters that work on
+// serverless and edge runtimes. Module-scope init works on Vercel and
+// Netlify; on Cloudflare Workers env bindings are only available inside
+// the handler, so construct the client there instead.
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(100, '15 m')
+})
+
+export async function POST(request: Request) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const { success } = await ratelimit.limit(ip)
+
+  if (!success) {
+    return new Response('Too many requests', { status: 429 })
+  }
+
+  // Process request
+}
+```
+
+如果無法新增依賴，請優先採用平台原生的速率限制：Cloudflare WAF 速率限制規則、Vercel WAF、AWS API Gateway 節流，或在應用程式前方使用 nginx `limit_req`。
+
 #### 驗證步驟
 - [ ] 所有 API 端點有速率限制
 - [ ] 昂貴操作有更嚴格限制
 - [ ] 基於 IP 的速率限制
 - [ ] 基於使用者的速率限制（已認證）
+- [ ] 速率限制器狀態可跨 serverless/edge 呼叫保留（共享儲存）
 
 ### 8. 敏感資料暴露
 
@@ -334,58 +368,9 @@ catch (error) {
 - [ ] 詳細錯誤只在伺服器日誌
 - [ ] 不向使用者暴露堆疊追蹤
 
-### 9. 區塊鏈安全（Solana）
+### 9. Web3 / 區塊鏈（如適用）
 
-#### 錢包驗證
-```typescript
-import { verify } from '@solana/web3.js'
-
-async function verifyWalletOwnership(
-  publicKey: string,
-  signature: string,
-  message: string
-) {
-  try {
-    const isValid = verify(
-      Buffer.from(message),
-      Buffer.from(signature, 'base64'),
-      Buffer.from(publicKey, 'base64')
-    )
-    return isValid
-  } catch (error) {
-    return false
-  }
-}
-```
-
-#### 交易驗證
-```typescript
-async function verifyTransaction(transaction: Transaction) {
-  // 驗證收款人
-  if (transaction.to !== expectedRecipient) {
-    throw new Error('Invalid recipient')
-  }
-
-  // 驗證金額
-  if (transaction.amount > maxAmount) {
-    throw new Error('Amount exceeds limit')
-  }
-
-  // 驗證使用者有足夠餘額
-  const balance = await getBalance(transaction.from)
-  if (balance < transaction.amount) {
-    throw new Error('Insufficient balance')
-  }
-
-  return true
-}
-```
-
-#### 驗證步驟
-- [ ] 錢包簽章已驗證
-- [ ] 交易詳情已驗證
-- [ ] 交易前有餘額檢查
-- [ ] 無盲目交易簽署
+錢包所有權驗證、交易驗證與簽署 UX 已移至專屬的 `web3-dapp-security` 技能。智慧合約稽核請參閱 `defi-amm-security`，代幣精度陷阱請參閱 `evm-token-decimals`。當專案涉及區塊鏈時再套用這些技能；它們不屬於每次通用安全性審查的範圍。
 
 ### 10. 依賴安全
 
@@ -480,7 +465,7 @@ test('enforces rate limits', async () => {
 - [ ] **Row Level Security**：Supabase 已啟用
 - [ ] **CORS**：正確設定
 - [ ] **檔案上傳**：已驗證（大小、類型）
-- [ ] **錢包簽章**：已驗證（如果是區塊鏈）
+- [ ] **錢包簽章**：已驗證（如果是區塊鏈——參閱 `web3-dapp-security`）
 
 ## 資源
 

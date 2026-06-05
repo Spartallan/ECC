@@ -207,6 +207,8 @@ function renderUserContent(html: string) {
 }
 ```
 
+DOMPurify는 하나의 선택지일 뿐이며, `sanitize-html`도 흔히 사용되는 대안입니다. 새니타이징은 사용자가 작성한 HTML을 실제로 렌더링해야 할 때만 수행하세요. 단순히 사용자 텍스트를 표시하는 경우라면 `dangerouslySetInnerHTML`과 새니타이저를 동원하는 대신 텍스트로 렌더링하세요(또는 출력 시 이스케이프하세요).
+
 #### Content Security Policy
 ```typescript
 // next.config.js
@@ -292,11 +294,43 @@ const searchLimiter = rateLimit({
 app.use('/api/search', searchLimiter)
 ```
 
+#### 서버리스 및 엣지 런타임
+
+`express-rate-limit`은 카운터를 프로세스 메모리에 보관하므로 수명이 긴 서버를 전제로 합니다. 서버리스 또는 엣지 플랫폼에서는 호출마다 새로운 프로세스일 수 있으므로, 공유 저장소나 플랫폼의 자체 제어 기능을 사용하세요:
+
+```typescript
+// Upstash Ratelimit - shared Redis-backed counters that work on
+// serverless and edge runtimes. Module-scope init works on Vercel and
+// Netlify; on Cloudflare Workers env bindings are only available inside
+// the handler, so construct the client there instead.
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(100, '15 m')
+})
+
+export async function POST(request: Request) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const { success } = await ratelimit.limit(ip)
+
+  if (!success) {
+    return new Response('Too many requests', { status: 429 })
+  }
+
+  // Process request
+}
+```
+
+의존성 추가가 어려운 상황이라면 플랫폼 자체의 속도 제한을 우선 사용하세요: Cloudflare WAF 속도 제한 규칙, Vercel WAF, AWS API Gateway 스로틀링, 또는 앱 앞단의 nginx `limit_req`.
+
 #### 확인 단계
 - [ ] 모든 API 엔드포인트에 속도 제한 적용
 - [ ] 비용이 높은 작업에 더 엄격한 제한
 - [ ] IP 기반 속도 제한
 - [ ] 사용자 기반 속도 제한 (인증된 사용자)
+- [ ] 제한기 상태가 서버리스/엣지 호출 간에 유지됨 (공유 저장소)
 
 ### 8. 민감한 데이터 노출
 
@@ -337,65 +371,9 @@ catch (error) {
 - [ ] 상세 에러는 서버 로그에만 기록
 - [ ] 사용자에게 스택 트레이스가 노출되지 않음
 
-### 9. 블록체인 보안 (Solana)
+### 9. Web3 / 블록체인 (해당하는 경우)
 
-#### 지갑 검증
-```typescript
-import nacl from 'tweetnacl'
-import bs58 from 'bs58'
-import { PublicKey } from '@solana/web3.js'
-
-async function verifyWalletOwnership(
-  publicKey: string,
-  signature: string,
-  message: string
-) {
-  try {
-    const publicKeyBytes = new PublicKey(publicKey).toBytes()
-    const signatureBytes = bs58.decode(signature)
-    const messageBytes = new TextEncoder().encode(message)
-
-    return nacl.sign.detached.verify(
-      messageBytes,
-      signatureBytes,
-      publicKeyBytes
-    )
-  } catch (error) {
-    return false
-  }
-}
-```
-
-참고: Solana 공개 키와 서명은 일반적으로 base64가 아니라 base58로 인코딩됩니다.
-
-#### 트랜잭션 검증
-```typescript
-async function verifyTransaction(transaction: Transaction) {
-  // Verify recipient
-  if (transaction.to !== expectedRecipient) {
-    throw new Error('Invalid recipient')
-  }
-
-  // Verify amount
-  if (transaction.amount > maxAmount) {
-    throw new Error('Amount exceeds limit')
-  }
-
-  // Verify user has sufficient balance
-  const balance = await getBalance(transaction.from)
-  if (balance < transaction.amount) {
-    throw new Error('Insufficient balance')
-  }
-
-  return true
-}
-```
-
-#### 확인 단계
-- [ ] 지갑 서명 검증됨
-- [ ] 트랜잭션 세부 정보 유효성 검사됨
-- [ ] 트랜잭션 전 잔액 확인
-- [ ] 블라인드 트랜잭션 서명 없음
+지갑 소유권 검증, 트랜잭션 유효성 검사, 서명 UX는 전용 `web3-dapp-security` 스킬로 이동했습니다. 스마트 컨트랙트 감사는 `defi-amm-security`를, 토큰 정밀도 함정은 `evm-token-decimals`를 참고하세요. 프로젝트가 체인을 다룰 때 해당 스킬을 적용하세요. 모든 일반 보안 리뷰에 포함될 내용은 아닙니다.
 
 ### 10. 의존성 보안
 
@@ -490,7 +468,7 @@ test('enforces rate limits', async () => {
 - [ ] **Row Level Security**: Supabase에서 활성화됨
 - [ ] **CORS**: 적절히 구성됨
 - [ ] **파일 업로드**: 유효성 검사됨 (크기, 타입)
-- [ ] **지갑 서명**: 검증됨 (블록체인인 경우)
+- [ ] **지갑 서명**: 검증됨 (블록체인인 경우 - `web3-dapp-security` 참고)
 
 ## 참고 자료
 

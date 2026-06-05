@@ -332,6 +332,7 @@
         "skills/security-bounty-hunter",
         "skills/springboot-security",
         "skills/evm-token-decimals",
+        "skills/web3-dapp-security",
         "the-security-guide.md"
       ],
       "targets": [

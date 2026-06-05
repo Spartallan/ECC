@@ -209,6 +209,11 @@ function renderUserContent(html: string) {
 }
 ```
 
+DOMPurify is one option; `sanitize-html` is a common alternative. Sanitize
+only when you genuinely need to render user-authored HTML - if you are just
+displaying user text, render it as text (or escape it at output) instead of
+reaching for `dangerouslySetInnerHTML` plus a sanitizer.
+
 #### Content Security Policy
 ```typescript
 // next.config.js
@@ -292,11 +297,47 @@ const searchLimiter = rateLimit({
 app.use('/api/search', searchLimiter)
 ```
 
+#### Serverless and Edge Runtimes
+
+`express-rate-limit` keeps its counters in process memory, which assumes a
+long-lived server. On serverless or edge platforms each invocation may be a
+fresh process, so use a shared store or the platform's native control:
+
+```typescript
+// Upstash Ratelimit - shared Redis-backed counters that work on
+// serverless and edge runtimes. Module-scope init works on Vercel and
+// Netlify; on Cloudflare Workers env bindings are only available inside
+// the handler, so construct the client there instead.
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(100, '15 m')
+})
+
+export async function POST(request: Request) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'anonymous'
+  const { success } = await ratelimit.limit(ip)
+
+  if (!success) {
+    return new Response('Too many requests', { status: 429 })
+  }
+
+  // Process request
+}
+```
+
+If adding a dependency is not an option, prefer platform-native rate
+limiting: Cloudflare WAF rate-limiting rules, Vercel WAF, AWS API Gateway
+throttling, or nginx `limit_req` in front of the app.
+
 #### Verification Steps
 - [ ] Rate limiting on all API endpoints
 - [ ] Stricter limits on expensive operations
 - [ ] IP-based rate limiting
 - [ ] User-based rate limiting (authenticated)
+- [ ] Limiter state survives serverless/edge invocations (shared store)
 
 ### 8. Sensitive Data Exposure
 
@@ -337,58 +378,13 @@ catch (error) {
 - [ ] Detailed errors only in server logs
 - [ ] No stack traces exposed to users
 
-### 9. Blockchain Security (Solana)
+### 9. Web3 / Blockchain (when applicable)
 
-#### Wallet Verification
-```typescript
-import { verify } from '@solana/web3.js'
-
-async function verifyWalletOwnership(
-  publicKey: string,
-  signature: string,
-  message: string
-) {
-  try {
-    const isValid = verify(
-      Buffer.from(message),
-      Buffer.from(signature, 'base64'),
-      Buffer.from(publicKey, 'base64')
-    )
-    return isValid
-  } catch (error) {
-    return false
-  }
-}
-```
-
-#### Transaction Verification
-```typescript
-async function verifyTransaction(transaction: Transaction) {
-  // Verify recipient
-  if (transaction.to !== expectedRecipient) {
-    throw new Error('Invalid recipient')
-  }
-
-  // Verify amount
-  if (transaction.amount > maxAmount) {
-    throw new Error('Amount exceeds limit')
-  }
-
-  // Verify user has sufficient balance
-  const balance = await getBalance(transaction.from)
-  if (balance < transaction.amount) {
-    throw new Error('Insufficient balance')
-  }
-
-  return true
-}
-```
-
-#### Verification Steps
-- [ ] Wallet signatures verified
-- [ ] Transaction details validated
-- [ ] Balance checks before transactions
-- [ ] No blind transaction signing
+Wallet ownership verification, transaction validation, and signing UX moved
+to the dedicated `web3-dapp-security` skill. For smart-contract auditing see
+`defi-amm-security`, and for token-precision pitfalls see
+`evm-token-decimals`. Apply those skills when the project touches a chain;
+they do not belong in every generic security review.
 
 ### 10. Dependency Security
 
@@ -483,7 +479,7 @@ Before ANY production deployment:
 - [ ] **Row Level Security**: Enabled in Supabase
 - [ ] **CORS**: Properly configured
 - [ ] **File Uploads**: Validated (size, type)
-- [ ] **Wallet Signatures**: Verified (if blockchain)
+- [ ] **Wallet Signatures**: Verified (if blockchain - see `web3-dapp-security`)
 
 ## Resources
 
