@@ -209,6 +209,9 @@ function renderUserContent(html: string) {
 DOMPurify 是其中一種選擇；`sanitize-html` 是常見的替代方案。只有在確實需要渲染使用者撰寫的 HTML 時才進行淨化——如果只是顯示使用者文字，請直接以文字渲染（或在輸出時跳脫），而不要動用 `dangerouslySetInnerHTML` 加上淨化器。
 
 #### Content Security Policy
+
+先從嚴格設定開始，只有在有書面移除計畫時才放寬。不要預設使用 `'unsafe-inline'` 或 `'unsafe-eval'`；它們會使 CSP 的大部分保護失效，應被視為暫時的相容性債務。
+
 ```typescript
 // next.config.js
 const securityHeaders = [
@@ -216,8 +219,11 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: `
       default-src 'self';
-      script-src 'self' 'unsafe-eval' 'unsafe-inline';
-      style-src 'self' 'unsafe-inline';
+      base-uri 'self';
+      object-src 'none';
+      frame-ancestors 'none';
+      script-src 'self';
+      style-src 'self';
       img-src 'self' data: https:;
       font-src 'self';
       connect-src 'self' https://api.example.com;

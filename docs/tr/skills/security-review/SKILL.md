@@ -210,6 +210,9 @@ function renderUserContent(html: string) {
 DOMPurify bir seçenektir; `sanitize-html` yaygın bir alternatiftir. Yalnızca kullanıcı tarafından yazılmış HTML'i gerçekten render etmeniz gerektiğinde sanitize edin - sadece kullanıcı metnini gösteriyorsanız, `dangerouslySetInnerHTML` artı bir sanitizer'a başvurmak yerine onu metin olarak render edin (veya çıktıda escape edin).
 
 #### Content Security Policy
+
+Sıkı başlayın ve yalnızca belgelenmiş bir kaldırma planıyla gevşetin. `'unsafe-inline'` veya `'unsafe-eval'` varsayılan olmamalıdır; CSP korumasının büyük kısmını etkisiz kılarlar ve geçici uyumluluk borcu olarak ele alınmalıdırlar.
+
 ```typescript
 // next.config.js
 const securityHeaders = [
@@ -217,8 +220,11 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: `
       default-src 'self';
-      script-src 'self' 'unsafe-eval' 'unsafe-inline';
-      style-src 'self' 'unsafe-inline';
+      base-uri 'self';
+      object-src 'none';
+      frame-ancestors 'none';
+      script-src 'self';
+      style-src 'self';
       img-src 'self' data: https:;
       font-src 'self';
       connect-src 'self' https://api.example.com;

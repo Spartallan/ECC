@@ -225,6 +225,8 @@ DOMPurify 只是其中一种选择；`sanitize-html` 是常见的替代方案。
 
 #### 内容安全策略
 
+先从严格配置开始，只有在有书面移除计划时才放宽。不要默认使用 `'unsafe-inline'` 或 `'unsafe-eval'`；它们会使 CSP 的大部分保护失效，应被视为临时的兼容性债务。
+
 ```typescript
 // next.config.js
 const securityHeaders = [
@@ -232,8 +234,11 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: `
       default-src 'self';
-      script-src 'self' 'unsafe-eval' 'unsafe-inline';
-      style-src 'self' 'unsafe-inline';
+      base-uri 'self';
+      object-src 'none';
+      frame-ancestors 'none';
+      script-src 'self';
+      style-src 'self';
       img-src 'self' data: https:;
       font-src 'self';
       connect-src 'self' https://api.example.com;

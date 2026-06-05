@@ -209,6 +209,9 @@ function renderUserContent(html: string) {
 DOMPurifyは選択肢の1つであり、`sanitize-html`は一般的な代替手段です。サニタイズは、ユーザーが作成したHTMLを本当にレンダリングする必要がある場合にのみ行ってください。単にユーザーのテキストを表示するだけなら、`dangerouslySetInnerHTML`とサニタイザーに頼るのではなく、テキストとしてレンダリング（または出力時にエスケープ）してください。
 
 #### コンテンツセキュリティポリシー
+
+まず厳格に設定し、緩和する場合は文書化された撤去計画とともに行ってください。`'unsafe-inline'` や `'unsafe-eval'` をデフォルトにしないでください。これらは CSP の保護の大部分を無効化するため、一時的な互換性の負債として扱うべきです。
+
 ```typescript
 // next.config.js
 const securityHeaders = [
@@ -216,8 +219,11 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: `
       default-src 'self';
-      script-src 'self' 'unsafe-eval' 'unsafe-inline';
-      style-src 'self' 'unsafe-inline';
+      base-uri 'self';
+      object-src 'none';
+      frame-ancestors 'none';
+      script-src 'self';
+      style-src 'self';
       img-src 'self' data: https:;
       font-src 'self';
       connect-src 'self' https://api.example.com;
