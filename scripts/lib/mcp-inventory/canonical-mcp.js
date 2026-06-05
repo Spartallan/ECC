@@ -219,7 +219,8 @@ function mergeServers(serverRecords) {
 
   return Array.from(byName.values()).map(server => {
     const uniqueSignatures = Array.from(new Set(server.signatures));
-    const { signatures, ...rest } = server;
+    // Rest-destructure to drop signatures from the public record.
+    const { signatures: _signatures, ...rest } = server;
     return {
       ...rest,
       harnessCount: server.sources.length,
